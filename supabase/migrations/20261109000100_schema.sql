@@ -151,3 +151,94 @@ create table public.addons (
   available_from      date,                     -- Inglês e combo entram no 2º ano
   active              boolean not null default true
 );
+
+-- -----------------------------------------------------------------------------
+-- Contratos (matrículas), parcelas e upgrade
+-- -----------------------------------------------------------------------------
+create table public.contracts (
+  id                   uuid primary key default gen_random_uuid(),
+  user_id              uuid not null references public.profiles (id) on delete restrict,
+  plan_id              uuid not null references public.plans (id),
+  status               public.contract_status not null default 'pendente',
+  all_formations       boolean not null default false, -- false = só a formação contratada
+  list_price_cents     integer not null,       -- preço vigente na contratação (por formação ou pacote)
+  upgrade_credit_cents integer not null default 0 check (upgrade_credit_cents >= 0),
+  amount_due_cents     integer not null check (amount_due_cents >= 0), -- list_price - crédito
+  installments_count   integer not null check (installments_count between 1 and 12),
+  payment_method       public.payment_method not null,
+  previous_contract_id uuid references public.contracts (id),
+  hold_until           timestamptz,            -- reserva de vaga de lote enquanto aguarda pagamento
+  access_starts_at     timestamptz,
+  access_ends_at       timestamptz,            -- null com status ativo = vitalício condicionado
+  gateway              text not null default 'asaas',
+  gateway_ref          text,                   -- id do parcelamento no gateway
+  created_at           timestamptz not null default now(),
+  activated_at         timestamptz,
+  closed_at            timestamptz,
+  check (amount_due_cents = list_price_cents - upgrade_credit_cents)
+);
+create index contracts_user_idx on public.contracts (user_id, status);
+create index contracts_plan_idx on public.contracts (plan_id, status);
+-- Um aluno tem no máximo um contrato ativo e um pendente por vez.
+create unique index contracts_one_active_per_user on public.contracts (user_id) where status = 'ativo';
+create unique index contracts_one_pending_per_user on public.contracts (user_id) where status = 'pendente';
+
+create table public.contract_formations (
+  contract_id  uuid not null references public.contracts (id) on delete cascade,
+  formation_id uuid not null references public.formations (id),
+  primary key (contract_id, formation_id)
+);
+
+create table public.installments (
+  id                 uuid primary key default gen_random_uuid(),
+  contract_id        uuid not null references public.contracts (id) on delete cascade,
+  number             integer not null check (number between 1 and 12),
+  amount_cents       integer not null check (amount_cents > 0),
+  due_date           date not null,
+  status             public.installment_status not null default 'pendente',
+  gateway_payment_id text unique,
+  invoice_url        text,
+  paid_at            timestamptz,
+  updated_at         timestamptz not null default now(),
+  unique (contract_id, number)
+);
+create index installments_status_idx on public.installments (status, due_date);
+
+-- Registro auditável de cada upgrade (crédito, saldo e parcelas canceladas).
+create table public.upgrades (
+  id                       uuid primary key default gen_random_uuid(),
+  from_contract_id         uuid not null references public.contracts (id),
+  to_contract_id           uuid not null unique references public.contracts (id),
+  credit_cents             integer not null,
+  canceled_pending_cents   integer not null,
+  amount_due_cents         integer not null,
+  created_at               timestamptz not null default now()
+);
+
+create table public.addon_subscriptions (
+  id                      uuid primary key default gen_random_uuid(),
+  user_id                 uuid not null references public.profiles (id) on delete restrict,
+  addon_id                uuid not null references public.addons (id),
+  status                  public.addon_status not null default 'pendente',
+  monthly_price_cents     integer not null,
+  gateway_subscription_id text unique,
+  started_at              timestamptz,
+  canceled_at             timestamptz,
+  created_at              timestamptz not null default now()
+);
+create unique index addon_one_live_per_user on public.addon_subscriptions (user_id, addon_id)
+  where status in ('pendente', 'ativa', 'inadimplente');
+
+-- Garantia de 7 dias: pedido de reembolso a partir da liberação do acesso.
+create table public.refund_requests (
+  id             uuid primary key default gen_random_uuid(),
+  contract_id    uuid not null unique references public.contracts (id),
+  user_id        uuid not null references public.profiles (id),
+  reason         text not null default '',
+  status         public.refund_status not null default 'solicitado',
+  refunded_cents integer,
+  staff_note     text,
+  requested_at   timestamptz not null default now(),
+  handled_by     uuid references public.profiles (id),
+  handled_at     timestamptz
+);
