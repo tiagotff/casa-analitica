@@ -242,3 +242,25 @@ create table public.refund_requests (
   handled_by     uuid references public.profiles (id),
   handled_at     timestamptz
 );
+
+-- -----------------------------------------------------------------------------
+-- Resumão Guiado (gravações semanais)
+-- -----------------------------------------------------------------------------
+create table public.resumao_sessions (
+  id           uuid primary key default gen_random_uuid(),
+  formation_id uuid not null references public.formations (id) on delete cascade,
+  week_number  integer not null,
+  title        text not null,
+  duration_min integer not null default 90,
+  provider     text not null default 'bunny',
+  video_ref    text,
+  release_at   timestamptz not null,
+  status       public.content_status not null default 'rascunho',
+  unique (formation_id, week_number)
+);
+
+create table public.resumao_session_lessons (
+  session_id uuid not null references public.resumao_sessions (id) on delete cascade,
+  lesson_id  uuid not null references public.lessons (id) on delete cascade,
+  primary key (session_id, lesson_id)
+);
