@@ -26,3 +26,26 @@ end $$;
 
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- -----------------------------------------------------------------------------
+-- Perfis de acesso
+-- -----------------------------------------------------------------------------
+create or replace function public.has_role(p_role public.app_role) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.user_roles where user_id = auth.uid() and role = p_role)
+$$;
+
+create or replace function public.is_staff() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.user_roles where user_id = auth.uid() and role in ('suporte', 'admin'))
+$$;
+
+create or replace function public.is_instructor_of(p_formation uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.formation_instructors where formation_id = p_formation and user_id = auth.uid())
+$$;
+
+create or replace function public.lesson_formation(p_lesson uuid) returns uuid
+language sql stable security definer set search_path = '' as $$
+  select m.formation_id from public.lessons l join public.modules m on m.id = l.module_id where l.id = p_lesson
+$$;
