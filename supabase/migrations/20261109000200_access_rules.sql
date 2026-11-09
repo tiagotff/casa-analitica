@@ -328,3 +328,57 @@ begin
   insert into public.audit_log (action, entity, entity_id, data)
   values ('contrato_ativado', 'contract', c.id::text, jsonb_build_object('plano', p.code));
 end $$;
+
+-- -----------------------------------------------------------------------------
+-- Garantia de 7 dias
+-- O aluno pode pedir o dinheiro de volta em até 7 dias corridos depois que o
+-- acesso foi liberado (activated_at). O suporte conclui o pedido; o servidor
+-- estorna no gateway e chama finalize_refund.
+-- -----------------------------------------------------------------------------
+create or replace function public.refund_deadline(p_contract uuid) returns timestamptz
+language sql stable security definer set search_path = '' as $$
+  select activated_at + interval '7 days' from public.contracts where id = p_contract
+$$;
+
+create or replace function public.request_refund(p_contract uuid, p_reason text) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare c public.contracts; v_id uuid;
+begin
+  select * into c from public.contracts where id = p_contract and user_id = auth.uid() for update;
+  if not found then raise exception 'contrato_nao_encontrado'; end if;
+  if c.status <> 'ativo' or c.activated_at is null then raise exception 'contrato_nao_ativo'; end if;
+  if now() > c.activated_at + interval '7 days' then raise exception 'prazo_de_garantia_encerrado'; end if;
+  insert into public.refund_requests (contract_id, user_id, reason) values (c.id, c.user_id, coalesce(p_reason, ''))
+  returning id into v_id;
+  insert into public.audit_log (actor_id, action, entity, entity_id) values (auth.uid(), 'reembolso_solicitado', 'contract', c.id::text);
+  return v_id;
+exception when unique_violation then raise exception 'reembolso_ja_solicitado';
+end $$;
+
+-- Executada pelo servidor depois de estornar e cancelar as cobranças no gateway.
+create or replace function public.finalize_refund(p_request uuid, p_staff uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare r public.refund_requests; v_paid integer;
+begin
+  select * into r from public.refund_requests where id = p_request for update;
+  if not found or r.status <> 'solicitado' then raise exception 'pedido_invalido'; end if;
+  -- 'estornada' entra na conta caso o webhook do estorno chegue antes desta função.
+  select coalesce(sum(amount_cents) filter (where status in ('paga', 'estornada')), 0) into v_paid from public.installments where contract_id = r.contract_id;
+
+  update public.installments set status = 'estornada' where contract_id = r.contract_id and status = 'paga';
+  update public.installments set status = 'cancelada' where contract_id = r.contract_id and status in ('pendente', 'vencida');
+  update public.contracts set status = 'reembolsado', access_ends_at = now(), closed_at = now() where id = r.contract_id;
+  update public.refund_requests set status = 'concluido', refunded_cents = v_paid, handled_by = p_staff, handled_at = now() where id = r.id;
+  insert into public.audit_log (actor_id, action, entity, entity_id, data)
+  values (p_staff, 'reembolso_concluido', 'contract', r.contract_id::text, jsonb_build_object('valor_cents', v_paid));
+end $$;
+
+revoke execute on function public.finalize_refund(uuid, uuid) from public, anon, authenticated;
+grant execute on function public.finalize_refund(uuid, uuid) to service_role;
+revoke execute on function public.request_refund(uuid, text) from anon;
+
+revoke execute on function public.activate_contract(uuid) from public, anon, authenticated;
+grant execute on function public.activate_contract(uuid) to service_role;
+revoke execute on function public.start_checkout(text, uuid[], public.payment_method, integer, boolean) from anon;
+revoke execute on function public.start_upgrade(uuid, text, public.payment_method, integer, boolean) from anon;
+revoke execute on function public.upgrade_quote(uuid, text, boolean) from anon;
