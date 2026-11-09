@@ -212,3 +212,85 @@ do $$ begin
 end $$;
 insert into public.contact_messages (name, email, subject, message) values ('Visitante', 'v@teste.com', 'Dúvida', 'Como funciona o parcelamento?');
 reset role;
+
+-- 11) Módulo 1 aberto para avaliação, sem plano; módulo 2 continua fechado
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000d';
+do $$ begin
+  assert public.can_view_lesson((select l.id from public.lessons l join public.modules m on m.id=l.module_id join public.formations f on f.id=m.formation_id
+    where f.slug='engenharia-dados-cloud' and m.position=1 and l.position=4)), 'módulo 1 inteiro aberto para avaliação';
+  assert not public.can_view_lesson((select l.id from public.lessons l join public.modules m on m.id=l.module_id join public.formations f on f.id=m.formation_id
+    where f.slug='engenharia-dados-cloud' and m.position=2 and l.position=1)), 'módulo 2 exige a formação';
+end $$;
+reset role;
+set role anon; set request.jwt.claim.sub = '';
+do $$ begin
+  assert not public.can_view_lesson((select l.id from public.lessons l join public.modules m on m.id=l.module_id where m.is_preview limit 1)), 'avaliação exige conta';
+end $$;
+reset role;
+
+-- 12) Pacote com todas as formações: preço × 1,95 e acesso a todas
+do $$ begin
+  assert (select all_formations_price_cents from public.plans where code='lote2') = round(229900 * 1.95), 'preço do pacote';
+end $$;
+insert into auth.users (id, email) values ('00000000-0000-0000-0000-00000000000e', 'eva@teste.com');
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000e';
+select public.start_checkout('lote2', array[]::uuid[], 'pix', 1, true) as eva_contrato \gset
+reset role;
+insert into public.installments (contract_id, number, amount_cents, due_date, gateway_payment_id, status, paid_at)
+values (:'eva_contrato', 1, 448305, current_date, 'pay_eva_1', 'paga', now());
+select public.activate_contract(:'eva_contrato');
+do $$ begin
+  assert (select list_price_cents from public.contracts where user_id='00000000-0000-0000-0000-00000000000e') = 448305, 'contrato registra o preço do pacote';
+  assert (select bool_and(public.user_has_formation('00000000-0000-0000-0000-00000000000e', id)) from public.formations), 'pacote libera as 6 formações';
+  assert not public.user_has_formation('00000000-0000-0000-0000-00000000000b', (select id from public.formations where slug='ciencia-dados-ia')), 'sem contrato ativo, sem formação';
+end $$;
+-- Upgrade de escopo na mesma oferta: Ana (Continuidade, 1 formação) → Continuidade com todas
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$
+declare q record;
+begin
+  select * into q from public.upgrade_quote((select id from public.contracts where status='ativo'), 'continuidade', true);
+  assert q.target_price_cents = round(562800 * 1.95), 'destino é o pacote da mesma oferta';
+  assert q.amount_due_cents = round(562800 * 1.95) - (24975 + 44819), 'crédito descontado do pacote';
+end $$;
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000e';
+do $$ begin
+  perform public.upgrade_quote((select id from public.contracts where status='ativo'), 'legado', false);
+  raise exception 'pacote não volta para uma formação';
+exception when others then assert sqlerrm like '%upgrade_nao_reduz_formacoes%', sqlerrm;
+end $$;
+
+-- 13) Garantia de 7 dias
+select public.request_refund((select id from public.contracts where status='ativo'), 'Não era o que eu esperava') as eva_pedido \gset
+do $$ begin
+  perform public.start_upgrade((select id from public.contracts where status='ativo'), 'legado', 'pix', 1, true);
+  raise exception 'upgrade deveria ficar bloqueado com reembolso em análise';
+exception when others then assert sqlerrm like '%reembolso_em_analise%', sqlerrm;
+end $$;
+do $$ begin
+  perform public.request_refund((select id from public.contracts where status='ativo'), 'de novo');
+  raise exception 'não aceita dois pedidos';
+exception when others then assert sqlerrm like '%reembolso_ja_solicitado%', sqlerrm;
+end $$;
+do $$ begin
+  perform public.finalize_refund((select id from public.refund_requests limit 1), auth.uid());
+  raise exception 'aluno não conclui reembolso';
+exception when insufficient_privilege then null;
+end $$;
+reset role;
+select public.finalize_refund(:'eva_pedido', '00000000-0000-0000-0000-00000000000d');
+do $$ begin
+  assert (select status from public.contracts where user_id='00000000-0000-0000-0000-00000000000e') = 'reembolsado', 'contrato reembolsado';
+  assert (select refunded_cents from public.refund_requests) = 448305, 'valor devolvido = valor pago';
+  assert not public.user_has_formation('00000000-0000-0000-0000-00000000000e', (select id from public.formations limit 1)), 'acesso encerrado após reembolso';
+end $$;
+-- Fora do prazo: Ana com acesso liberado há 8 dias
+update public.contracts set activated_at = now() - interval '8 days' where user_id='00000000-0000-0000-0000-00000000000a' and status='ativo';
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$ begin
+  perform public.request_refund((select id from public.contracts where status='ativo'), 'tarde demais');
+  raise exception 'prazo deveria ter acabado';
+exception when others then assert sqlerrm like '%prazo_de_garantia_encerrado%', sqlerrm;
+end $$;
+reset role;
