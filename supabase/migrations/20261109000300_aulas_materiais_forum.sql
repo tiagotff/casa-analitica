@@ -111,3 +111,121 @@ create policy comments_update on public.lesson_comments for update
   using (user_id = auth.uid() or public.is_moderator(public.lesson_formation(lesson_id)));
 create policy comments_delete on public.lesson_comments for delete
   using (user_id = auth.uid() or public.has_role('admin'));
+
+-- -----------------------------------------------------------------------------
+-- Fórum: um espaço Geral (formation_id nulo) e um por formação
+-- -----------------------------------------------------------------------------
+create or replace function public.can_access_forum(p_formation uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select auth.uid() is not null and (
+       p_formation is null
+    or public.is_moderator(p_formation)
+    or public.user_has_formation(auth.uid(), p_formation)
+  )
+$$;
+
+create table public.forum_topics (
+  id               uuid primary key default gen_random_uuid(),
+  formation_id     uuid references public.formations (id) on delete cascade,  -- null = Geral
+  lesson_id        uuid references public.lessons (id) on delete set null,     -- dúvida ligada a uma aula (opcional)
+  user_id          uuid not null references public.profiles (id) on delete cascade,
+  title            text not null check (length(trim(title)) between 5 and 160),
+  body             text not null check (length(trim(body)) between 1 and 8000),
+  kind             text not null default 'duvida' check (kind in ('duvida', 'discussao')),
+  status           text not null default 'aberto' check (status in ('aberto', 'resolvido')),
+  pinned           boolean not null default false,
+  accepted_post_id uuid,
+  created_at       timestamptz not null default now(),
+  edited_at        timestamptz,
+  last_activity_at timestamptz not null default now(),
+  hidden_at        timestamptz,
+  hidden_by        uuid references public.profiles (id)
+);
+create index forum_topics_list_idx on public.forum_topics (formation_id, pinned desc, last_activity_at desc);
+
+create table public.forum_posts (
+  id         uuid primary key default gen_random_uuid(),
+  topic_id   uuid not null references public.forum_topics (id) on delete cascade,
+  user_id    uuid not null references public.profiles (id) on delete cascade,
+  body       text not null check (length(trim(body)) between 1 and 8000),
+  created_at timestamptz not null default now(),
+  edited_at  timestamptz,
+  hidden_at  timestamptz,
+  hidden_by  uuid references public.profiles (id)
+);
+create index forum_posts_topic_idx on public.forum_posts (topic_id, created_at);
+alter table public.forum_topics add constraint forum_accepted_fk foreign key (accepted_post_id) references public.forum_posts (id) on delete set null;
+
+create or replace function public.forum_topic_guard() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare v_mod boolean := public.is_moderator(old.formation_id);
+begin
+  if new.user_id <> old.user_id or new.formation_id is distinct from old.formation_id then raise exception 'campo_imutavel'; end if;
+  if (new.pinned <> old.pinned or new.hidden_at is distinct from old.hidden_at) and not v_mod then raise exception 'sem_permissao_moderacao'; end if;
+  if (new.status <> old.status or new.accepted_post_id is distinct from old.accepted_post_id)
+     and not (v_mod or old.user_id = auth.uid()) then raise exception 'sem_permissao'; end if;
+  if (new.title <> old.title or new.body <> old.body) then
+    if old.user_id <> auth.uid() then raise exception 'so_o_autor_edita'; end if;
+    new.edited_at := now();
+  end if;
+  if new.accepted_post_id is not null and not exists (select 1 from public.forum_posts where id = new.accepted_post_id and topic_id = old.id) then
+    raise exception 'resposta_de_outro_topico';
+  end if;
+  if new.accepted_post_id is not null then new.status := 'resolvido'; end if;
+  if new.hidden_at is not null and old.hidden_at is null then new.hidden_by := auth.uid(); end if;
+  return new;
+end $$;
+create trigger forum_topics_guard before update on public.forum_topics for each row execute function public.forum_topic_guard();
+
+create or replace function public.forum_topic_insert_guard() returns trigger
+language plpgsql security definer set search_path = '' as $$
+begin
+  new.pinned := false; new.hidden_at := null; new.hidden_by := null; new.accepted_post_id := null; new.status := 'aberto';
+  if new.lesson_id is not null and public.lesson_formation(new.lesson_id) is distinct from new.formation_id then
+    raise exception 'aula_de_outra_formacao';
+  end if;
+  return new;
+end $$;
+create trigger forum_topics_insert_guard before insert on public.forum_topics for each row execute function public.forum_topic_insert_guard();
+
+create or replace function public.forum_post_guard() returns trigger
+language plpgsql security definer set search_path = '' as $$
+declare v_formation uuid;
+begin
+  select formation_id into v_formation from public.forum_topics where id = coalesce(new.topic_id, old.topic_id);
+  if tg_op = 'INSERT' then
+    new.hidden_at := null; new.hidden_by := null; new.edited_at := null;
+    update public.forum_topics set last_activity_at = now() where id = new.topic_id;
+  else
+    if new.topic_id <> old.topic_id or new.user_id <> old.user_id then raise exception 'campo_imutavel'; end if;
+    if new.hidden_at is distinct from old.hidden_at and not public.is_moderator(v_formation) then raise exception 'sem_permissao_moderacao'; end if;
+    if new.body <> old.body then
+      if old.user_id <> auth.uid() then raise exception 'so_o_autor_edita'; end if;
+      new.edited_at := now();
+    end if;
+    if new.hidden_at is not null and old.hidden_at is null then new.hidden_by := auth.uid(); end if;
+  end if;
+  return new;
+end $$;
+create trigger forum_posts_guard before insert or update on public.forum_posts for each row execute function public.forum_post_guard();
+
+alter table public.forum_topics enable row level security;
+alter table public.forum_posts  enable row level security;
+
+create policy topics_read on public.forum_topics for select using (
+  public.can_access_forum(formation_id) and (hidden_at is null or user_id = auth.uid() or public.is_moderator(formation_id)));
+create policy topics_insert on public.forum_topics for insert with check (user_id = auth.uid() and public.can_access_forum(formation_id));
+create policy topics_update on public.forum_topics for update using (user_id = auth.uid() or public.is_moderator(formation_id));
+create policy topics_delete on public.forum_topics for delete using (public.has_role('admin'));
+
+create policy posts_read on public.forum_posts for select using (
+  exists (select 1 from public.forum_topics t where t.id = topic_id and public.can_access_forum(t.formation_id)
+          and (t.hidden_at is null or public.is_moderator(t.formation_id)))
+  and (hidden_at is null or user_id = auth.uid()
+       or public.is_moderator((select formation_id from public.forum_topics where id = topic_id))));
+create policy posts_insert on public.forum_posts for insert with check (
+  user_id = auth.uid()
+  and exists (select 1 from public.forum_topics t where t.id = topic_id and t.hidden_at is null and public.can_access_forum(t.formation_id)));
+create policy posts_update on public.forum_posts for update using (
+  user_id = auth.uid() or public.is_moderator((select formation_id from public.forum_topics where id = topic_id)));
+create policy posts_delete on public.forum_posts for delete using (public.has_role('admin'));
