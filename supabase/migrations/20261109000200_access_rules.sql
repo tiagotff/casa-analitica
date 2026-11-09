@@ -404,3 +404,82 @@ begin
          coalesce(sum(done), 0)::int
   from per_user;
 end $$;
+
+-- =============================================================================
+-- Row Level Security
+-- Escrita financeira (contratos, parcelas, assinaturas) só pelo servidor
+-- (service role) ou pelas funções acima; nenhuma policy de insert/update para alunos.
+-- =============================================================================
+alter table public.profiles               enable row level security;
+alter table public.user_roles             enable row level security;
+alter table public.billing_customers      enable row level security;
+alter table public.formations             enable row level security;
+alter table public.formation_instructors  enable row level security;
+alter table public.modules                enable row level security;
+alter table public.lessons                enable row level security;
+alter table public.lesson_media           enable row level security;
+alter table public.lesson_materials       enable row level security;
+alter table public.plans                  enable row level security;
+alter table public.addons                 enable row level security;
+alter table public.contracts              enable row level security;
+alter table public.contract_formations    enable row level security;
+alter table public.installments           enable row level security;
+alter table public.upgrades               enable row level security;
+alter table public.refund_requests        enable row level security;
+alter table public.addon_subscriptions    enable row level security;
+alter table public.resumao_sessions       enable row level security;
+alter table public.resumao_session_lessons enable row level security;
+alter table public.lesson_progress        enable row level security;
+alter table public.certificates           enable row level security;
+alter table public.career_tracks          enable row level security;
+alter table public.career_track_steps     enable row level security;
+alter table public.vlog_posts             enable row level security;
+alter table public.ebooks                 enable row level security;
+alter table public.ebook_downloads        enable row level security;
+alter table public.site_pages             enable row level security;
+alter table public.site_settings          enable row level security;
+alter table public.contact_messages       enable row level security;
+alter table public.gateway_events         enable row level security;
+alter table public.audit_log              enable row level security;
+
+-- Pessoas ---------------------------------------------------------------------
+create policy profiles_self_read   on public.profiles for select using (id = auth.uid() or public.is_staff());
+create policy profiles_self_update on public.profiles for update using (id = auth.uid()) with check (id = auth.uid());
+create policy profiles_admin_all   on public.profiles for all using (public.has_role('admin'));
+-- Professores veem nome e e-mail dos alunos das suas formações.
+-- (função security definer: a policy não pode depender do RLS de contracts, que o professor não lê)
+create or replace function public.is_my_student(p_user uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.contracts c
+    join public.contract_formations cf on cf.contract_id = c.id
+    join public.formation_instructors fi on fi.formation_id = cf.formation_id and fi.user_id = auth.uid()
+    where c.user_id = p_user and c.status = 'ativo'
+  )
+$$;
+create policy profiles_instructor_read on public.profiles for select using (public.is_my_student(id));
+
+create policy roles_self_read  on public.user_roles for select using (user_id = auth.uid() or public.is_staff());
+create policy roles_admin_all  on public.user_roles for all using (public.has_role('admin')) with check (public.has_role('admin'));
+
+create policy billing_read on public.billing_customers for select using (user_id = auth.uid() or public.is_staff());
+
+-- Catálogo: ementa pública; edição por professor da formação ou admin -------------
+create policy formations_public_read on public.formations for select using (status = 'publicado' or public.has_role('admin') or public.is_instructor_of(id));
+create policy formations_admin_all   on public.formations for all using (public.has_role('admin')) with check (public.has_role('admin'));
+create policy formations_instr_update on public.formations for update using (public.is_instructor_of(id)) with check (public.is_instructor_of(id));
+
+create policy instructors_read      on public.formation_instructors for select using (true);
+create policy instructors_admin_all on public.formation_instructors for all using (public.has_role('admin')) with check (public.has_role('admin'));
+
+create policy modules_read  on public.modules for select using (
+  exists (select 1 from public.formations f where f.id = formation_id and (f.status = 'publicado' or public.has_role('admin') or public.is_instructor_of(f.id))));
+create policy modules_write on public.modules for all
+  using (public.has_role('admin') or public.is_instructor_of(formation_id))
+  with check (public.has_role('admin') or public.is_instructor_of(formation_id));
+
+create policy lessons_read on public.lessons for select using (
+  status = 'publicado' or public.has_role('admin') or public.is_instructor_of(public.lesson_formation(id)));
+create policy lessons_write on public.lessons for all
+  using (public.has_role('admin') or exists (select 1 from public.modules m where m.id = module_id and public.is_instructor_of(m.formation_id)))
+  with check (public.has_role('admin') or exists (select 1 from public.modules m where m.id = module_id and public.is_instructor_of(m.formation_id)));
