@@ -249,3 +249,11 @@ language sql stable security definer set search_path = '' as $$
   from public.profiles p where p.id = any (p_users)
 $$;
 revoke execute on function public.public_names(uuid[]) from anon;
+
+-- -----------------------------------------------------------------------------
+-- Resumão: o id do vídeo também não pode ser lido pelo aluno.
+-- A coluna video_ref sai do select dos usuários; o servidor lê com service role
+-- depois de conferir can_view_resumao. Professor e admin gravam normalmente.
+-- -----------------------------------------------------------------------------
+revoke select on public.resumao_sessions from anon, authenticated;
+grant select (id, formation_id, week_number, title, duration_min, provider, release_at, status) on public.resumao_sessions to authenticated;
