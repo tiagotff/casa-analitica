@@ -285,3 +285,89 @@ create table public.certificates (
   issued_at    timestamptz not null default now(),
   unique (user_id, formation_id)
 );
+
+-- -----------------------------------------------------------------------------
+-- Conteúdo do site (rodapé: Trilhas de Carreira, Vlog, E-books, institucionais)
+-- -----------------------------------------------------------------------------
+create table public.career_tracks (
+  id          uuid primary key default gen_random_uuid(),
+  slug        text not null unique,
+  title       text not null,
+  summary     text not null,
+  target_role text not null,            -- cargo de destino: Analista de Dados, Engenheiro de Dados...
+  level       text not null default 'iniciante',
+  position    integer not null default 0,
+  status      public.content_status not null default 'rascunho'
+);
+
+create table public.career_track_steps (
+  id           uuid primary key default gen_random_uuid(),
+  track_id     uuid not null references public.career_tracks (id) on delete cascade,
+  position     integer not null,
+  title        text not null,
+  description  text not null default '',
+  formation_id uuid references public.formations (id),
+  module_id    uuid references public.modules (id),
+  unique (track_id, position)
+);
+
+create table public.vlog_posts (
+  id           uuid primary key default gen_random_uuid(),
+  slug         text not null unique,
+  title        text not null,
+  excerpt      text not null,
+  body_md      text not null default '',
+  video_url    text,                     -- vídeo público (YouTube etc.)
+  cover_path   text,
+  author_id    uuid references public.profiles (id),
+  status       public.content_status not null default 'rascunho',
+  published_at timestamptz
+);
+
+create table public.ebooks (
+  id           uuid primary key default gen_random_uuid(),
+  slug         text not null unique,
+  title        text not null,
+  summary      text not null,
+  cover_path   text,
+  file_path    text not null,            -- bucket privado "ebooks"
+  requires_login boolean not null default true, -- captação de lead
+  status       public.content_status not null default 'rascunho',
+  published_at timestamptz
+);
+
+create table public.ebook_downloads (
+  id         uuid primary key default gen_random_uuid(),
+  ebook_id   uuid not null references public.ebooks (id) on delete cascade,
+  user_id    uuid references public.profiles (id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+-- Páginas institucionais editáveis: quem-somos, por-onde-comecar, privacidade, termos...
+create table public.site_pages (
+  slug       text primary key,
+  title      text not null,
+  body_md    text not null,
+  updated_by uuid references public.profiles (id),
+  updated_at timestamptz not null default now()
+);
+
+-- Configurações públicas: link da comunidade no WhatsApp, e-mail de contato etc.
+create table public.site_settings (
+  key        text primary key,
+  value      jsonb not null,
+  is_public  boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+create table public.contact_messages (
+  id         uuid primary key default gen_random_uuid(),
+  name       text not null check (length(name) between 2 and 120),
+  email      citext not null,
+  subject    text not null check (length(subject) between 2 and 160),
+  message    text not null check (length(message) between 5 and 4000),
+  user_id    uuid references public.profiles (id) on delete set null,
+  status     public.message_status not null default 'nova',
+  handled_by uuid references public.profiles (id),
+  created_at timestamptz not null default now()
+);
