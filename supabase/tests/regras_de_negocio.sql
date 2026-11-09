@@ -119,3 +119,96 @@ begin
   assert (select count(*) from public.profiles) = 2, 'professora vê o próprio perfil e o da aluna da sua formação';
 end $$;
 reset role;
+
+-- 6) Upgrade da Ana: 1º lote (3 parcelas pagas) → Continuidade
+update public.plans set sale_starts_at = now() - interval '1 day' where kind = 'plano';
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$
+declare q record;
+begin
+  select * into q from public.upgrade_quote((select id from public.contracts where status='ativo'), 'continuidade');
+  assert q.credit_cents = 24975, 'crédito = 3 × 83,25: ' || q.credit_cents;
+  assert q.pending_cents = 99900 - 24975, 'pendente = restante do lote';
+  assert q.amount_due_cents = 562800 - 24975, 'a pagar = 5.628,00 − 249,75';
+  begin
+    perform public.upgrade_quote((select id from public.contracts where status='ativo'), 'lote1');
+    raise exception 'mesma oferta, mesmo escopo não é upgrade';
+  exception when others then assert sqlerrm like '%upgrade_exige_plano_superior%', sqlerrm; end;
+  begin
+    perform public.upgrade_quote((select id from public.contracts where status='ativo'), 'lote3');
+    raise exception 'não aceita outro lote como destino';
+  exception when others then assert sqlerrm like '%plano_indisponivel%', sqlerrm; end;
+end $$;
+select public.start_upgrade((select id from public.contracts where status='ativo'), 'continuidade', 'pix', 12) as ana_upgrade \gset
+reset role;
+insert into public.installments (contract_id, number, amount_cents, due_date, gateway_payment_id, status, paid_at)
+values (:'ana_upgrade', 1, 44819, current_date, 'pay_up_1', 'paga', now());
+select public.activate_contract(:'ana_upgrade');
+
+do $$ begin
+  assert (select status from public.contracts where id = (select id from public.contracts where user_id='00000000-0000-0000-0000-00000000000a' and plan_id=(select id from public.plans where code='lote1'))) = 'substituido', 'contrato antigo substituído';
+  assert (select count(*) from public.installments where contract_id = (select id from public.contracts where user_id='00000000-0000-0000-0000-00000000000a' and plan_id=(select id from public.plans where code='lote1')) and status = 'cancelada') = 9, '9 parcelas pendentes canceladas';
+  assert (select canceled_pending_cents from public.upgrades) = 99900 - 24975, 'upgrade registra o pendente cancelado';
+  assert (select access_ends_at::date from public.contracts where id = (select id from public.contracts where user_id='00000000-0000-0000-0000-00000000000a' and status='ativo')) = (now() + interval '24 months')::date, 'acesso reiniciado com 24 meses';
+  assert (select count(*) from public.contract_formations where contract_id = (select id from public.contracts where user_id='00000000-0000-0000-0000-00000000000a' and status='ativo')) = 1, 'formação levada para o novo contrato';
+  assert public.seats_taken((select id from public.plans where code='lote1')) = 1, 'vaga do lote continua consumida após upgrade';
+end $$;
+
+-- 7) Upgrade em cadeia carrega o crédito: Continuidade → Legado
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$
+declare q record;
+begin
+  select * into q from public.upgrade_quote((select id from public.contracts where status='ativo'), 'legado');
+  assert q.credit_cents = 24975 + 44819, 'crédito acumulado: ' || q.credit_cents;
+  assert q.amount_due_cents = 838800 - 24975 - 44819, 'a pagar no Legado';
+  begin
+    perform public.upgrade_quote((select id from public.contracts where status='ativo'), 'essencial');
+    raise exception 'não permite downgrade';
+  exception when others then assert sqlerrm like '%upgrade_exige_plano_superior%', sqlerrm; end;
+end $$;
+reset role;
+
+-- 8) Lote esgotado e reserva de vaga
+update public.plans set seats = 1 where code = 'lote1';
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+do $$ begin
+  perform public.start_checkout('lote1', array[(select id from public.formations where slug='negocios-analytics')], 'pix', 1);
+  raise exception 'lote deveria estar esgotado';
+exception when others then assert sqlerrm like '%lote_esgotado%', sqlerrm;
+end $$;
+-- com o 1º lote esgotado, o 2º abre
+select public.start_checkout('lote2', array[(select id from public.formations where slug='negocios-analytics')], 'pix', 1) is not null as bruno_lote2;
+do $$ begin
+  begin
+    perform public.start_checkout('legado', array[]::uuid[], 'pix', 1);
+    raise exception 'exige escolher a formação';
+  exception when others then assert sqlerrm like '%quantidade_de_formacoes_invalida%', sqlerrm; end;
+end $$;
+reset role;
+
+-- 9) Resumão: só com complemento ativo
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000c';
+insert into public.resumao_sessions (formation_id, week_number, title, release_at, status)
+values ((select id from public.formations where slug='ciencia-dados-ia'), 1, 'Semana 1', now() - interval '1 hour', 'publicado');
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$ begin assert (select count(*) from public.resumao_sessions) = 0, 'sem complemento, sem Resumão'; end $$;
+reset role;
+insert into public.addon_subscriptions (user_id, addon_id, status, monthly_price_cents)
+values ('00000000-0000-0000-0000-00000000000a', (select id from public.addons where code='resumao'), 'ativa', 14900);
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$ begin assert (select count(*) from public.resumao_sessions) = 1, 'com complemento, vê o Resumão'; end $$;
+reset role;
+
+-- 10) Visitante anônimo
+set role anon; set request.jwt.claim.sub = '';
+do $$ begin
+  assert (select count(*) from public.formations) = 6, 'catálogo público';
+  assert (select count(*) from public.lessons) = 120, 'ementa pública';
+  assert (select count(*) from public.lesson_media) = 0, 'vídeo nunca é público';
+  assert (select count(*) from public.contracts) = 0, 'financeiro nunca é público';
+  assert (select count(*) from public.plan_availability) = 7, 'vitrine de planos pública';
+end $$;
+insert into public.contact_messages (name, email, subject, message) values ('Visitante', 'v@teste.com', 'Dúvida', 'Como funciona o parcelamento?');
+reset role;
