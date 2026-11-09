@@ -141,3 +141,70 @@ select p.id, p.code, p.name, p.kind, p.price_cents, p.all_formations_price_cents
         and (p.seats is null or public.seats_taken(p.id) < p.seats)) as on_sale
 from public.plans p
 where p.active;
+
+-- -----------------------------------------------------------------------------
+-- Checkout: cria o contrato pendente e reserva a vaga de forma atômica.
+-- Lotes são vendidos em sequência: o 2º só abre quando o 1º esgota (ou encerra).
+-- -----------------------------------------------------------------------------
+-- p_all_formations = false: o aluno escolhe exatamente 1 formação e paga o preço da oferta.
+-- p_all_formations = true:  todas as formações, preço × multiplicador (1,95).
+create or replace function public.start_checkout(
+  p_plan_code text, p_formations uuid[], p_method public.payment_method, p_installments integer,
+  p_all_formations boolean default false
+) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare
+  v_user uuid := auth.uid();
+  v_plan public.plans;
+  v_contract uuid;
+  v_hold timestamptz;
+  v_price integer;
+begin
+  if v_user is null then raise exception 'login_obrigatorio'; end if;
+
+  select * into v_plan from public.plans where code = p_plan_code and active for update;
+  if not found then raise exception 'plano_indisponivel'; end if;
+  if (v_plan.sale_starts_at is not null and v_plan.sale_starts_at > now())
+     or (v_plan.sale_ends_at is not null and v_plan.sale_ends_at <= now()) then
+    raise exception 'fora_do_periodo_de_venda';
+  end if;
+  if p_installments < 1 or p_installments > v_plan.max_installments then raise exception 'parcelas_invalidas'; end if;
+
+  if v_plan.kind = 'lote' then
+    if public.seats_taken(v_plan.id) >= v_plan.seats then raise exception 'lote_esgotado'; end if;
+    if exists (
+      select 1 from public.plans prev
+      where prev.kind = 'lote' and prev.active and prev.rank < v_plan.rank
+        and (prev.sale_ends_at is null or prev.sale_ends_at > now())
+        and public.seats_taken(prev.id) < prev.seats
+    ) then raise exception 'lote_anterior_aberto'; end if;
+    v_hold := now() + interval '3 days';
+  end if;
+
+  if public.active_contract(v_user) is not null then raise exception 'ja_possui_contrato_ativo_use_upgrade'; end if;
+
+  if not p_all_formations then
+    if coalesce(array_length(p_formations, 1), 0) <> 1 then raise exception 'quantidade_de_formacoes_invalida'; end if;
+    if not exists (select 1 from public.formations x where x.id = p_formations[1] and x.status = 'publicado') then
+      raise exception 'formacao_invalida';
+    end if;
+  end if;
+  v_price := case when p_all_formations then v_plan.all_formations_price_cents else v_plan.price_cents end;
+
+  -- Substitui um checkout pendente anterior do mesmo aluno.
+  update public.contracts set status = 'cancelado', closed_at = now()
+  where user_id = v_user and status = 'pendente';
+
+  insert into public.contracts (user_id, plan_id, all_formations, list_price_cents, amount_due_cents, installments_count, payment_method, hold_until)
+  values (v_user, v_plan.id, p_all_formations, v_price, v_price, p_installments, p_method, v_hold)
+  returning id into v_contract;
+
+  if not p_all_formations then
+    insert into public.contract_formations (contract_id, formation_id) values (v_contract, p_formations[1]);
+  end if;
+
+  insert into public.audit_log (actor_id, action, entity, entity_id, data)
+  values (v_user, 'checkout_iniciado', 'contract', v_contract::text,
+          jsonb_build_object('plano', p_plan_code, 'todas_as_formacoes', p_all_formations));
+  return v_contract;
+end $$;
