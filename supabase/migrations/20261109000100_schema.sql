@@ -371,3 +371,29 @@ create table public.contact_messages (
   handled_by uuid references public.profiles (id),
   created_at timestamptz not null default now()
 );
+
+-- -----------------------------------------------------------------------------
+-- Operação: eventos do gateway (idempotência) e trilha de auditoria
+-- -----------------------------------------------------------------------------
+create table public.gateway_events (
+  id           uuid primary key default gen_random_uuid(),
+  gateway      text not null,
+  event_id     text not null,
+  event_type   text not null,
+  payload      jsonb not null,
+  received_at  timestamptz not null default now(),
+  processed_at timestamptz,
+  error        text,
+  unique (gateway, event_id)
+);
+
+create table public.audit_log (
+  id         bigint generated always as identity primary key,
+  actor_id   uuid references public.profiles (id),
+  action     text not null,
+  entity     text not null,
+  entity_id  text,
+  data       jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+create index audit_entity_idx on public.audit_log (entity, entity_id);
