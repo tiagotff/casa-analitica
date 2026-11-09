@@ -208,3 +208,123 @@ begin
           jsonb_build_object('plano', p_plan_code, 'todas_as_formacoes', p_all_formations));
   return v_contract;
 end $$;
+
+-- -----------------------------------------------------------------------------
+-- Upgrade (Política de Upgrade da Casa Analítica)
+--   crédito      = valor efetivamente pago no contrato atual
+--                  (inclui o crédito que ele já trouxe de um upgrade anterior)
+--   valor a pagar = preço vigente do destino − crédito  (nunca negativo)
+--   parcelas pendentes do contrato atual são canceladas na ativação, sem cobrança dupla
+-- Destinos válidos:
+--   * plano regular superior, mantendo ou ampliando o escopo (1 formação → todas);
+--   * a mesma oferta atual, ampliando de 1 formação para todas.
+-- Quem já tem todas as formações não volta para uma só.
+-- -----------------------------------------------------------------------------
+create or replace function public.upgrade_quote(p_contract uuid, p_target_code text, p_all_formations boolean default null)
+returns table (current_plan text, target_plan text, all_formations boolean, target_price_cents integer, credit_cents integer,
+               pending_cents integer, amount_due_cents integer, new_access_months integer)
+language plpgsql stable security definer set search_path = '' as $$
+declare
+  c public.contracts; cur public.plans; tgt public.plans; v_paid integer; v_pending integer; v_all boolean;
+begin
+  select * into c from public.contracts where id = p_contract;
+  if not found or (c.user_id <> auth.uid() and not public.is_staff()) then raise exception 'contrato_nao_encontrado'; end if;
+  if c.status <> 'ativo' then raise exception 'contrato_nao_ativo'; end if;
+  v_all := coalesce(p_all_formations, c.all_formations);
+  if c.all_formations and not v_all then raise exception 'upgrade_nao_reduz_formacoes'; end if;
+
+  select * into cur from public.plans where id = c.plan_id;
+  select * into tgt from public.plans where code = p_target_code and active;
+  if not found then raise exception 'plano_indisponivel'; end if;
+  if not (
+       (tgt.kind = 'plano' and tgt.rank > cur.rank)
+    or (tgt.id = cur.id and v_all and not c.all_formations)
+  ) then
+    if tgt.kind <> 'plano' and tgt.id <> cur.id then raise exception 'plano_indisponivel'; end if;
+    raise exception 'upgrade_exige_plano_superior';
+  end if;
+
+  select coalesce(sum(amount_cents) filter (where status = 'paga'), 0)::int,
+         coalesce(sum(amount_cents) filter (where status in ('pendente', 'vencida')), 0)::int
+    into v_paid, v_pending
+  from public.installments where contract_id = c.id;
+
+  return query
+  select cur.name, tgt.name, v_all,
+         case when v_all then tgt.all_formations_price_cents else tgt.price_cents end,
+         c.upgrade_credit_cents + v_paid, v_pending,
+         greatest(case when v_all then tgt.all_formations_price_cents else tgt.price_cents end - (c.upgrade_credit_cents + v_paid), 0),
+         tgt.access_months;
+end $$;
+
+create or replace function public.start_upgrade(
+  p_contract uuid, p_target_code text, p_method public.payment_method, p_installments integer,
+  p_all_formations boolean default null
+) returns uuid
+language plpgsql security definer set search_path = '' as $$
+declare q record; v_new uuid; v_target uuid; c public.contracts;
+begin
+  select * into c from public.contracts where id = p_contract and user_id = auth.uid() for update;
+  if not found then raise exception 'contrato_nao_encontrado'; end if;
+  -- Com pedido de reembolso em análise, o contrato não pode ser trocado por upgrade.
+  if exists (select 1 from public.refund_requests where contract_id = p_contract and status = 'solicitado') then
+    raise exception 'reembolso_em_analise';
+  end if;
+  select * into q from public.upgrade_quote(p_contract, p_target_code, p_all_formations);
+  if p_installments < 1 or p_installments > 12 then raise exception 'parcelas_invalidas'; end if;
+  select id into v_target from public.plans where code = p_target_code;
+
+  update public.contracts set status = 'cancelado', closed_at = now()
+  where user_id = auth.uid() and status = 'pendente';
+
+  insert into public.contracts (user_id, plan_id, all_formations, list_price_cents, upgrade_credit_cents, amount_due_cents,
+                                installments_count, payment_method, previous_contract_id)
+  values (auth.uid(), v_target, q.all_formations, q.target_price_cents, least(q.credit_cents, q.target_price_cents), q.amount_due_cents,
+          case when q.amount_due_cents = 0 then 1 else p_installments end, p_method, p_contract)
+  returning id into v_new;
+
+  if not q.all_formations then
+    insert into public.contract_formations (contract_id, formation_id)
+    select v_new, formation_id from public.contract_formations where contract_id = p_contract;
+  end if;
+
+  insert into public.audit_log (actor_id, action, entity, entity_id, data)
+  values (auth.uid(), 'upgrade_iniciado', 'contract', v_new::text, to_jsonb(q));
+  return v_new;
+end $$;
+
+-- Chamada pelo servidor (service role) quando o 1º pagamento é confirmado.
+-- Inicia um período integral de acesso e, se for upgrade, encerra o contrato anterior.
+create or replace function public.activate_contract(p_contract uuid) returns void
+language plpgsql security definer set search_path = '' as $$
+declare c public.contracts; p public.plans; v_canceled integer;
+begin
+  select * into c from public.contracts where id = p_contract for update;
+  if not found then raise exception 'contrato_nao_encontrado'; end if;
+  if c.status = 'ativo' then return; end if;               -- idempotente
+  if c.status <> 'pendente' then raise exception 'contrato_nao_pendente'; end if;
+  select * into p from public.plans where id = c.plan_id;
+
+  if c.previous_contract_id is not null then
+    update public.installments set status = 'cancelada'
+    where contract_id = c.previous_contract_id and status in ('pendente', 'vencida');
+    get diagnostics v_canceled = row_count;
+
+    insert into public.upgrades (from_contract_id, to_contract_id, credit_cents, canceled_pending_cents, amount_due_cents)
+    select c.previous_contract_id, c.id, c.upgrade_credit_cents,
+           coalesce((select sum(amount_cents) from public.installments
+                     where contract_id = c.previous_contract_id and status = 'cancelada'), 0),
+           c.amount_due_cents;
+
+    update public.contracts set status = 'substituido', closed_at = now() where id = c.previous_contract_id;
+  end if;
+
+  update public.contracts
+     set status = 'ativo', activated_at = now(), hold_until = null,
+         access_starts_at = now(),
+         access_ends_at = case when p.access_months is null then null else now() + make_interval(months => p.access_months) end
+   where id = c.id;
+
+  insert into public.audit_log (action, entity, entity_id, data)
+  values ('contrato_ativado', 'contract', c.id::text, jsonb_build_object('plano', p.code));
+end $$;
