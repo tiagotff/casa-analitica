@@ -382,3 +382,25 @@ grant execute on function public.activate_contract(uuid) to service_role;
 revoke execute on function public.start_checkout(text, uuid[], public.payment_method, integer, boolean) from anon;
 revoke execute on function public.start_upgrade(uuid, text, public.payment_method, integer, boolean) from anon;
 revoke execute on function public.upgrade_quote(uuid, text, boolean) from anon;
+
+-- Estatísticas para o professor: só das próprias formações.
+create or replace function public.instructor_formation_stats(p_formation uuid)
+returns table (students integer, avg_progress numeric, completed_lessons integer)
+language plpgsql stable security definer set search_path = '' as $$
+begin
+  if not (public.is_instructor_of(p_formation) or public.has_role('admin')) then raise exception 'sem_permissao'; end if;
+  return query
+  with total as (
+    select count(*)::numeric n from public.lessons l join public.modules m on m.id = l.module_id
+    where m.formation_id = p_formation and l.status = 'publicado'
+  ), per_user as (
+    select lp.user_id, count(*) filter (where lp.completed_at is not null) done
+    from public.lesson_progress lp
+    where public.lesson_formation(lp.lesson_id) = p_formation
+    group by lp.user_id
+  )
+  select count(*)::int,
+         round(coalesce(avg(done / nullif((select n from total), 0)), 0) * 100, 1),
+         coalesce(sum(done), 0)::int
+  from per_user;
+end $$;
