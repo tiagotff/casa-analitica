@@ -117,3 +117,27 @@ language sql stable security definer set search_path = '' as $$
           and public.user_has_formation(auth.uid(), s.formation_id)
       )
 $$;
+
+-- -----------------------------------------------------------------------------
+-- Lotes: vagas
+-- Uma vaga é consumida por contrato ativo, substituído (fez upgrade depois)
+-- ou pendente dentro do prazo de reserva.
+-- -----------------------------------------------------------------------------
+create or replace function public.seats_taken(p_plan uuid) returns integer
+language sql stable security definer set search_path = '' as $$
+  select count(*)::int from public.contracts c
+  where c.plan_id = p_plan
+    and (c.status in ('ativo', 'substituido') or (c.status = 'pendente' and c.hold_until > now()))
+$$;
+
+create or replace view public.plan_availability with (security_invoker = true) as
+select p.id, p.code, p.name, p.kind, p.price_cents, p.all_formations_price_cents, p.all_access_multiplier,
+       p.max_installments, p.access_months, p.includes_future_formations, p.rank, p.seats,
+       p.sale_starts_at, p.sale_ends_at,
+       case when p.seats is null then null else greatest(p.seats - public.seats_taken(p.id), 0) end as seats_left,
+       (p.active
+        and (p.sale_starts_at is null or p.sale_starts_at <= now())
+        and (p.sale_ends_at is null or p.sale_ends_at > now())
+        and (p.seats is null or public.seats_taken(p.id) < p.seats)) as on_sale
+from public.plans p
+where p.active;
