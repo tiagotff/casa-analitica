@@ -58,3 +58,35 @@ begin
     end loop;
   end loop;
 end $$;
+
+-- Trilhas de carreira ------------------------------------------------------------
+insert into public.career_tracks (slug, title, summary, target_role, level, position, status) values
+  ('analista-de-negocios', 'Analista de Negócios e Dados', 'Do SQL ao dashboard executivo, com visão de negócio e finanças.', 'Analista de Negócios', 'iniciante', 1, 'publicado'),
+  ('engenheiro-de-dados', 'Engenheiro de Dados', 'Pipelines confiáveis, cloud e operação de dados em produção.', 'Engenheiro de Dados', 'intermediário', 2, 'publicado'),
+  ('cientista-de-dados', 'Cientista de Dados', 'Estatística, machine learning e deep learning aplicados a negócio.', 'Cientista de Dados', 'intermediário', 3, 'publicado'),
+  ('engenheiro-de-mlops', 'Engenheiro de MLOps', 'Do modelo no notebook ao modelo monitorado em produção.', 'Engenheiro de MLOps', 'intermediário', 4, 'publicado'),
+  ('engenheiro-de-ia', 'Engenheiro de IA', 'Aplicações com LLMs, RAG e agentes, prontas para produção.', 'Engenheiro de IA', 'intermediário', 5, 'publicado'),
+  ('lideranca-dados', 'Liderança em Dados e IA', 'Estratégia, governança e geração de valor para quem lidera times.', 'Head de Dados', 'avançado', 6, 'publicado');
+
+insert into public.career_track_steps (track_id, position, title, description, formation_id)
+select t.id, s.pos, s.title, s.descr, (select id from public.formations where slug = s.fslug)
+from public.career_tracks t
+join (values
+  ('analista-de-negocios', 1, 'Negócio e SQL', 'Modelos de negócio, perguntas e consultas.', 'negocios-analytics'),
+  ('analista-de-negocios', 2, 'Indicadores e visualização', 'KPIs, finanças e dashboards executivos.', 'negocios-analytics'),
+  ('analista-de-negocios', 3, 'Estatística para decisão', 'Incerteza e testes de hipótese.', 'ciencia-dados-ia'),
+  ('engenheiro-de-dados', 1, 'Fundamentos e modelagem', 'Arquitetura, Python e modelo dimensional.', 'engenharia-dados-cloud'),
+  ('engenheiro-de-dados', 2, 'Orquestração e cloud', 'Airflow, dbt e BigQuery.', 'engenharia-dados-cloud'),
+  ('engenheiro-de-dados', 3, 'SQL analítico', 'Funções de janela e performance.', 'negocios-analytics'),
+  ('cientista-de-dados', 1, 'Estatística aplicada', 'A base de qualquer modelo.', 'ciencia-dados-ia'),
+  ('cientista-de-dados', 2, 'Machine learning', 'Modelos supervisionados e validação.', 'ciencia-dados-ia'),
+  ('cientista-de-dados', 3, 'Deep learning e técnicas avançadas', 'Redes neurais, recomendação e causalidade.', 'ciencia-dados-ia'),
+  ('engenheiro-de-mlops', 1, 'Machine learning', 'Entender o modelo que vai para produção.', 'ciencia-dados-ia'),
+  ('engenheiro-de-mlops', 2, 'Experimentos e automação', 'MLflow, pipelines e CI/CD.', 'mlops'),
+  ('engenheiro-de-mlops', 3, 'Deploy e monitoramento', 'Serving, métricas e drift.', 'mlops'),
+  ('engenheiro-de-ia', 1, 'LLMs e RAG', 'Prompts, embeddings e recuperação.', 'engenharia-ia'),
+  ('engenheiro-de-ia', 2, 'Agentes e avaliação', 'Ferramentas, evals e segurança.', 'engenharia-ia'),
+  ('engenheiro-de-ia', 3, 'Operação em produção', 'Deploy e observabilidade.', 'mlops'),
+  ('lideranca-dados', 1, 'Estratégia e governança', 'Maturidade, priorização e LGPD.', 'gestao-estrategica-dados-ia'),
+  ('lideranca-dados', 2, 'Times e valor', 'Estrutura de times e métricas de valor.', 'gestao-estrategica-dados-ia')
+) as s(tslug, pos, title, descr, fslug) on s.tslug = t.slug;
