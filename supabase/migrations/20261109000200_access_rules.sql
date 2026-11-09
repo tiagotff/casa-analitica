@@ -483,3 +483,31 @@ create policy lessons_read on public.lessons for select using (
 create policy lessons_write on public.lessons for all
   using (public.has_role('admin') or exists (select 1 from public.modules m where m.id = module_id and public.is_instructor_of(m.formation_id)))
   with check (public.has_role('admin') or exists (select 1 from public.modules m where m.id = module_id and public.is_instructor_of(m.formation_id)));
+
+-- Vídeo e materiais: só quem pode assistir à aula -----------------------------------
+create policy media_read  on public.lesson_media for select using (public.can_view_lesson(lesson_id));
+create policy media_write on public.lesson_media for all
+  using (public.has_role('admin') or public.is_instructor_of(public.lesson_formation(lesson_id)))
+  with check (public.has_role('admin') or public.is_instructor_of(public.lesson_formation(lesson_id)));
+create policy materials_read  on public.lesson_materials for select using (public.can_view_lesson(lesson_id));
+create policy materials_write on public.lesson_materials for all
+  using (public.has_role('admin') or public.is_instructor_of(public.lesson_formation(lesson_id)))
+  with check (public.has_role('admin') or public.is_instructor_of(public.lesson_formation(lesson_id)));
+
+-- Ofertas -----------------------------------------------------------------------
+create policy plans_read  on public.plans  for select using (active or public.has_role('admin'));
+create policy plans_admin on public.plans  for all using (public.has_role('admin')) with check (public.has_role('admin'));
+create policy addons_read  on public.addons for select using (active or public.has_role('admin'));
+create policy addons_admin on public.addons for all using (public.has_role('admin')) with check (public.has_role('admin'));
+
+-- Financeiro: leitura pelo dono e pela equipe ---------------------------------------
+create policy contracts_read on public.contracts for select using (user_id = auth.uid() or public.is_staff());
+create policy cf_read on public.contract_formations for select using (
+  exists (select 1 from public.contracts c where c.id = contract_id and (c.user_id = auth.uid() or public.is_staff())));
+create policy installments_read on public.installments for select using (
+  exists (select 1 from public.contracts c where c.id = contract_id and (c.user_id = auth.uid() or public.is_staff())));
+create policy upgrades_read on public.upgrades for select using (
+  exists (select 1 from public.contracts c where c.id = to_contract_id and (c.user_id = auth.uid() or public.is_staff())));
+create policy refunds_read on public.refund_requests for select using (user_id = auth.uid() or public.is_staff());
+create policy refunds_staff_update on public.refund_requests for update using (public.is_staff()) with check (public.is_staff());
+create policy addon_subs_read on public.addon_subscriptions for select using (user_id = auth.uid() or public.is_staff());
