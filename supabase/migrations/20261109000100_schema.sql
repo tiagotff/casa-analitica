@@ -264,3 +264,24 @@ create table public.resumao_session_lessons (
   lesson_id  uuid not null references public.lessons (id) on delete cascade,
   primary key (session_id, lesson_id)
 );
+
+-- -----------------------------------------------------------------------------
+-- Aprendizagem
+-- -----------------------------------------------------------------------------
+create table public.lesson_progress (
+  user_id           uuid not null references public.profiles (id) on delete cascade,
+  lesson_id         uuid not null references public.lessons (id) on delete cascade,
+  last_position_sec integer not null default 0,
+  completed_at      timestamptz,
+  updated_at        timestamptz not null default now(),
+  primary key (user_id, lesson_id)
+);
+
+create table public.certificates (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references public.profiles (id) on delete cascade,
+  formation_id uuid not null references public.formations (id),
+  code         text not null unique default upper(substr(encode(gen_random_bytes(6), 'hex'), 1, 10)),
+  issued_at    timestamptz not null default now(),
+  unique (user_id, formation_id)
+);
