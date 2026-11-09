@@ -229,3 +229,23 @@ create policy posts_insert on public.forum_posts for insert with check (
 create policy posts_update on public.forum_posts for update using (
   user_id = auth.uid() or public.is_moderator((select formation_id from public.forum_topics where id = topic_id)));
 create policy posts_delete on public.forum_posts for delete using (public.has_role('admin'));
+
+-- Quem respondeu é professor/equipe? (para destacar "resposta da equipe" na interface)
+create or replace function public.staff_flags(p_users uuid[]) returns table (user_id uuid, is_team boolean)
+language sql stable security definer set search_path = '' as $$
+  select u, exists (select 1 from public.user_roles r where r.user_id = u and r.role in ('professor', 'suporte', 'admin'))
+  from unnest(p_users) u
+$$;
+revoke execute on function public.staff_flags(uuid[]) from anon;
+
+-- Nome público de quem comenta (sem e-mail, sem CPF)
+create or replace function public.public_names(p_users uuid[]) returns table (user_id uuid, name text)
+language sql stable security definer set search_path = '' as $$
+  select p.id, coalesce(
+    case when position(' ' in trim(p.full_name)) > 0
+         then split_part(trim(p.full_name), ' ', 1) || ' ' || left(split_part(trim(p.full_name), ' ', 2), 1) || '.'
+         else nullif(trim(p.full_name), '') end,
+    'Aluno')
+  from public.profiles p where p.id = any (p_users)
+$$;
+revoke execute on function public.public_names(uuid[]) from anon;
