@@ -511,3 +511,65 @@ create policy upgrades_read on public.upgrades for select using (
 create policy refunds_read on public.refund_requests for select using (user_id = auth.uid() or public.is_staff());
 create policy refunds_staff_update on public.refund_requests for update using (public.is_staff()) with check (public.is_staff());
 create policy addon_subs_read on public.addon_subscriptions for select using (user_id = auth.uid() or public.is_staff());
+
+-- Resumão ------------------------------------------------------------------------
+create policy resumao_read on public.resumao_sessions for select using (public.can_view_resumao(id));
+create policy resumao_write on public.resumao_sessions for all
+  using (public.has_role('admin') or public.is_instructor_of(formation_id))
+  with check (public.has_role('admin') or public.is_instructor_of(formation_id));
+create policy resumao_lessons_read on public.resumao_session_lessons for select using (public.can_view_resumao(session_id));
+create policy resumao_lessons_write on public.resumao_session_lessons for all
+  using (public.has_role('admin') or exists (select 1 from public.resumao_sessions s where s.id = session_id and public.is_instructor_of(s.formation_id)))
+  with check (public.has_role('admin') or exists (select 1 from public.resumao_sessions s where s.id = session_id and public.is_instructor_of(s.formation_id)));
+
+-- Aprendizagem -------------------------------------------------------------------
+create policy progress_self_read on public.lesson_progress for select using (
+  user_id = auth.uid() or public.is_staff() or public.is_instructor_of(public.lesson_formation(lesson_id)));
+create policy progress_self_insert on public.lesson_progress for insert with check (user_id = auth.uid() and public.can_view_lesson(lesson_id));
+create policy progress_self_update on public.lesson_progress for update using (user_id = auth.uid()) with check (user_id = auth.uid() and public.can_view_lesson(lesson_id));
+
+create policy certificates_read on public.certificates for select using (true); -- validação pública pelo código
+
+-- Conteúdo do site ------------------------------------------------------------------
+create policy tracks_read  on public.career_tracks for select using (status = 'publicado' or public.has_role('admin'));
+create policy tracks_admin on public.career_tracks for all using (public.has_role('admin')) with check (public.has_role('admin'));
+create policy steps_read   on public.career_track_steps for select using (
+  exists (select 1 from public.career_tracks t where t.id = track_id and (t.status = 'publicado' or public.has_role('admin'))));
+create policy steps_admin  on public.career_track_steps for all using (public.has_role('admin')) with check (public.has_role('admin'));
+
+create policy vlog_read  on public.vlog_posts for select using ((status = 'publicado' and published_at <= now()) or public.has_role('admin') or author_id = auth.uid());
+create policy vlog_admin on public.vlog_posts for all using (public.has_role('admin')) with check (public.has_role('admin'));
+create policy vlog_prof_insert on public.vlog_posts for insert with check (public.has_role('professor') and author_id = auth.uid());
+create policy vlog_prof_update on public.vlog_posts for update using (public.has_role('professor') and author_id = auth.uid()) with check (author_id = auth.uid());
+
+create policy ebooks_read  on public.ebooks for select using ((status = 'publicado' and published_at <= now()) or public.has_role('admin'));
+create policy ebooks_admin on public.ebooks for all using (public.has_role('admin')) with check (public.has_role('admin'));
+create policy ebook_dl_insert on public.ebook_downloads for insert with check (user_id = auth.uid());
+create policy ebook_dl_staff  on public.ebook_downloads for select using (public.is_staff());
+
+create policy pages_read  on public.site_pages for select using (true);
+create policy pages_admin on public.site_pages for all using (public.has_role('admin')) with check (public.has_role('admin'));
+
+create policy settings_read  on public.site_settings for select using (is_public or public.has_role('admin'));
+create policy settings_admin on public.site_settings for all using (public.has_role('admin')) with check (public.has_role('admin'));
+
+-- Fale Conosco: qualquer visitante envia; equipe atende ----------------------------
+create policy contact_insert on public.contact_messages for insert with check (status = 'nova' and handled_by is null and (user_id is null or user_id = auth.uid()));
+create policy contact_staff_read   on public.contact_messages for select using (public.is_staff());
+create policy contact_staff_update on public.contact_messages for update using (public.is_staff()) with check (public.is_staff());
+
+-- Operação -----------------------------------------------------------------------
+create policy audit_admin_read on public.audit_log for select using (public.has_role('admin'));
+-- gateway_events: sem policies; só o servidor (service role) lê e escreve.
+
+-- Grants da view (RLS das tabelas de base continua valendo via security_invoker)
+grant select on public.plan_availability to anon, authenticated;
+
+-- =============================================================================
+-- Storage: buckets privados; o servidor gera URLs assinadas depois de checar acesso
+-- =============================================================================
+insert into storage.buckets (id, name, public) values
+  ('materiais', 'materiais', false),
+  ('ebooks', 'ebooks', false),
+  ('site', 'site', true)
+on conflict (id) do nothing;
