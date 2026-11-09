@@ -294,3 +294,105 @@ do $$ begin
 exception when others then assert sqlerrm like '%prazo_de_garantia_encerrado%', sqlerrm;
 end $$;
 reset role;
+
+-- 14) Vídeo: aluno assiste mas nunca lê o id do vídeo; só professor da formação e admin
+insert into public.lesson_media (lesson_id, video_ref)
+select l.id, 'video-' || l.position from public.lessons l join public.modules m on m.id=l.module_id join public.formations f on f.id=m.formation_id
+where f.slug='ciencia-dados-ia' and m.position=1;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+do $$ begin
+  assert (select count(*) from public.lesson_media) = 0, 'aluno não lê id de vídeo, nem do módulo aberto';
+  begin
+    insert into public.lesson_media (lesson_id, video_ref) values ((select id from public.lessons limit 1), 'x');
+    raise exception 'aluno não pode subir vídeo';
+  exception when insufficient_privilege then null; end;
+end $$;
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000c';
+do $$ begin
+  assert (select count(*) from public.lesson_media) = 4, 'professora vê os vídeos da própria formação';
+  update public.lesson_media set video_ref = 'novo' where lesson_id in (select lesson_id from public.lesson_media limit 1);
+end $$;
+reset role;
+
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$ begin
+  begin
+    perform video_ref from public.resumao_sessions limit 1;
+    raise exception 'aluno não pode ler o id do vídeo do Resumão';
+  exception when insufficient_privilege then null; end;
+  assert (select count(*) from public.resumao_sessions) = 1, 'aluno continua vendo a lista do Resumão';
+end $$;
+reset role;
+
+-- 15) CPF: dono e equipe leem; professor não
+insert into public.profile_documents (user_id, cpf) values ('00000000-0000-0000-0000-00000000000a', '12345678909');
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000c';
+do $$ begin assert (select count(*) from public.profile_documents) = 0, 'professor não vê CPF'; end $$;
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000d';
+do $$ begin assert (select count(*) from public.profile_documents) = 1, 'suporte vê CPF'; end $$;
+reset role;
+
+-- 16) Comentários nas aulas, respostas e moderação
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+do $$
+declare aberta uuid; fechada uuid; c1 uuid; r1 uuid; r2 uuid;
+begin
+  select l.id into aberta from public.lessons l join public.modules m on m.id=l.module_id join public.formations f on f.id=m.formation_id where f.slug='mlops' and m.position=1 and l.position=1;
+  select l.id into fechada from public.lessons l join public.modules m on m.id=l.module_id join public.formations f on f.id=m.formation_id where f.slug='mlops' and m.position=2 and l.position=1;
+  insert into public.lesson_comments (lesson_id, user_id, body) values (aberta, auth.uid(), 'Ótima aula!') returning id into c1;
+  insert into public.lesson_comments (lesson_id, user_id, parent_id, body) values (aberta, auth.uid(), c1, 'Complementando') returning id into r1;
+  insert into public.lesson_comments (lesson_id, user_id, parent_id, body) values (aberta, auth.uid(), r1, 'Resposta da resposta') returning id into r2;
+  assert (select parent_id from public.lesson_comments where id = r2) = c1, 'resposta de resposta vira resposta ao comentário raiz';
+  begin
+    insert into public.lesson_comments (lesson_id, user_id, body) values (fechada, auth.uid(), 'oi');
+    raise exception 'não comenta aula sem acesso';
+  exception when insufficient_privilege then null; end;
+  begin
+    update public.lesson_comments set hidden_at = now() where id = c1;
+    raise exception 'aluno não modera';
+  exception when others then assert sqlerrm like '%sem_permissao_moderacao%', sqlerrm; end;
+end $$;
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000d';
+update public.lesson_comments set hidden_at = now() where body = 'Complementando';
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$ begin assert not exists (select 1 from public.lesson_comments where body = 'Complementando'), 'comentário oculto some para os outros'; end $$;
+reset role;
+
+-- 17) Fórum
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+do $$
+declare t uuid; p uuid;
+begin
+  insert into public.forum_topics (user_id, title, body) values (auth.uid(), 'Por onde começo em dados?', 'Sou de finanças e quero migrar.') returning id into t;
+  begin
+    insert into public.forum_topics (user_id, formation_id, title, body) values (auth.uid(), (select id from public.formations where slug='ciencia-dados-ia'), 'Dúvida de regressão', 'texto');
+    raise exception 'sem a formação, não posta no fórum dela';
+  exception when insufficient_privilege then null; end;
+  begin
+    update public.forum_topics set pinned = true where id = t;
+    raise exception 'aluno não fixa tópico';
+  exception when others then assert sqlerrm like '%sem_permissao_moderacao%', sqlerrm; end;
+end $$;
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000c';
+insert into public.forum_posts (topic_id, user_id, body) select id, '00000000-0000-0000-0000-00000000000c', 'Comece por Negócios & Analytics.' from public.forum_topics;
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+update public.forum_topics set accepted_post_id = (select id from public.forum_posts limit 1);
+do $$ begin assert (select status from public.forum_topics) = 'resolvido', 'aceitar resposta resolve o tópico'; end $$;
+reset role;
+set role authenticated; set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+do $$ begin
+  assert (select count(*) from public.forum_topics) = 1, 'fórum Geral visível a todos os logados';
+  assert (select count(*) from public.forum_posts) = 1, 'respostas visíveis';
+end $$;
+reset role;
+set role anon; set request.jwt.claim.sub = '';
+do $$ begin assert (select count(*) from public.forum_topics) = 0, 'fórum exige login'; end $$;
+reset role;
+
+select 'TODOS OS TESTES PASSARAM' as resultado;
