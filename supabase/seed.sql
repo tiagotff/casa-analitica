@@ -90,3 +90,12 @@ join (values
   ('lideranca-dados', 1, 'Estratégia e governança', 'Maturidade, priorização e LGPD.', 'gestao-estrategica-dados-ia'),
   ('lideranca-dados', 2, 'Times e valor', 'Estrutura de times e métricas de valor.', 'gestao-estrategica-dados-ia')
 ) as s(tslug, pos, title, descr, fslug) on s.tslug = t.slug;
+
+-- Vlog e e-books (exemplos para o layout; substitua pelo conteúdo real) ---------------
+insert into public.vlog_posts (slug, title, excerpt, body_md, status, published_at) values
+  ('por-que-sql-ainda-importa', 'Por que SQL ainda é a habilidade mais pedida em dados', 'Mesmo com IA escrevendo consultas, entender JOINs e granularidade separa quem confia no número de quem só copia.', 'Texto do episódio.', 'publicado', '2026-12-01 10:00-03'),
+  ('kpi-que-ninguem-usa', 'O KPI que ninguém usa: como desenhar indicadores que mudam decisões', 'Um indicador bom tem dono, meta e ação associada. Neste episódio, um passo a passo com exemplo de varejo.', 'Texto do episódio.', 'publicado', '2026-12-08 10:00-03');
+
+insert into public.ebooks (slug, title, summary, file_path, status, published_at) values
+  ('guia-primeiros-90-dias-em-dados', 'Guia dos primeiros 90 dias em dados', 'O que estudar, quais projetos montar e como se posicionar para a primeira vaga.', 'guia-primeiros-90-dias.pdf', 'publicado', '2026-12-01 10:00-03'),
+  ('checklist-governanca', 'Checklist de governança de dados para PMEs', '30 perguntas para saber onde sua empresa está e por onde começar.', 'checklist-governanca.pdf', 'publicado', '2026-12-01 10:00-03');
