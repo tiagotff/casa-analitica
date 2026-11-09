@@ -116,3 +116,38 @@ create table public.lesson_materials (
   storage_path text not null,                   -- bucket privado "materiais"
   created_at   timestamptz not null default now()
 );
+
+-- -----------------------------------------------------------------------------
+-- Ofertas: lotes de lançamento e planos regulares
+-- -----------------------------------------------------------------------------
+create table public.plans (
+  id                         uuid primary key default gen_random_uuid(),
+  code                       text not null unique,          -- lote1, essencial, legado...
+  name                       text not null,
+  kind                       public.offer_kind not null,
+  price_cents                integer not null check (price_cents > 0),
+  max_installments           integer not null default 12 check (max_installments between 1 and 12),
+  access_months              integer check (access_months > 0), -- null = vitalício condicionado
+  -- O preço é POR FORMAÇÃO. Acesso a todas as formações = preço × multiplicador (1,95 no lançamento).
+  all_access_multiplier      numeric(4,2) not null default 1.95 check (all_access_multiplier >= 1),
+  all_formations_price_cents integer generated always as (round(price_cents * all_access_multiplier)::int) stored,
+  includes_future_formations boolean not null default false,
+  rank                       integer not null,              -- ordem para upgrade (maior = superior)
+  seats                      integer check (seats > 0),     -- só lotes
+  sale_starts_at             timestamptz,
+  sale_ends_at               timestamptz,
+  active                     boolean not null default true,
+  created_at                 timestamptz not null default now(),
+  check (kind = 'plano' or seats is not null)
+);
+
+create table public.addons (
+  id                  uuid primary key default gen_random_uuid(),
+  code                text not null unique,     -- resumao | ingles | combo
+  name                text not null,
+  description         text not null,
+  monthly_price_cents integer not null check (monthly_price_cents > 0),
+  grants              text[] not null,          -- quais benefícios libera: {resumao}, {ingles}, {resumao,ingles}
+  available_from      date,                     -- Inglês e combo entram no 2º ano
+  active              boolean not null default true
+);
