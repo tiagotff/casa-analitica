@@ -49,3 +49,71 @@ create or replace function public.lesson_formation(p_lesson uuid) returns uuid
 language sql stable security definer set search_path = '' as $$
   select m.formation_id from public.lessons l join public.modules m on m.id = l.module_id where l.id = p_lesson
 $$;
+
+-- -----------------------------------------------------------------------------
+-- Direito de acesso ao conteúdo
+-- -----------------------------------------------------------------------------
+-- Contrato ativo e dentro da vigência (access_ends_at nulo = vitalício condicionado).
+create or replace function public.active_contract(p_user uuid) returns uuid
+language sql stable security definer set search_path = '' as $$
+  select c.id from public.contracts c
+  where c.user_id = p_user and c.status = 'ativo'
+    and c.access_starts_at <= now()
+    and (c.access_ends_at is null or c.access_ends_at > now())
+  limit 1
+$$;
+
+-- O aluno tem a formação se ela é a formação contratada, se contratou o pacote
+-- com todas as formações, ou (Legado) se a formação foi lançada depois do início do acesso.
+create or replace function public.user_has_formation(p_user uuid, p_formation uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1
+    from public.contracts c
+    join public.plans p on p.id = c.plan_id
+    join public.formations f on f.id = p_formation
+    where c.id = public.active_contract(p_user)
+      and (
+        exists (select 1 from public.contract_formations cf where cf.contract_id = c.id and cf.formation_id = p_formation)
+        or c.all_formations
+        or (p.includes_future_formations and f.launched_at > c.access_starts_at)
+      )
+  )
+$$;
+
+-- Regras de acesso à aula:
+--   * módulo de avaliação (is_preview): qualquer usuário logado, sem esperar a liberação semanal;
+--   * demais módulos: só quem tem a formação e depois da data de liberação semanal (release_at).
+create or replace function public.can_view_lesson(p_lesson uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select public.has_role('admin')
+      or public.is_instructor_of(public.lesson_formation(p_lesson))
+      or exists (
+        select 1 from public.lessons l join public.modules m on m.id = l.module_id
+        where l.id = p_lesson and l.status = 'publicado' and auth.uid() is not null
+          and (
+            m.is_preview
+            or (l.release_at <= now() and public.user_has_formation(auth.uid(), m.formation_id))
+          )
+      )
+$$;
+
+create or replace function public.has_addon_benefit(p_user uuid, p_benefit text) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.addon_subscriptions s join public.addons a on a.id = s.addon_id
+    where s.user_id = p_user and s.status = 'ativa' and a.grants @> array[p_benefit]
+  )
+$$;
+
+create or replace function public.can_view_resumao(p_session uuid) returns boolean
+language sql stable security definer set search_path = '' as $$
+  select public.has_role('admin')
+      or exists (select 1 from public.resumao_sessions s where s.id = p_session and public.is_instructor_of(s.formation_id))
+      or exists (
+        select 1 from public.resumao_sessions s
+        where s.id = p_session and s.status = 'publicado' and s.release_at <= now()
+          and public.has_addon_benefit(auth.uid(), 'resumao')
+          and public.user_has_formation(auth.uid(), s.formation_id)
+      )
+$$;
