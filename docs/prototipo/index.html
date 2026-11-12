@@ -311,12 +311,11 @@ function guard(area){const u=me();
 
 /* ===================== Site público ===================== */
 const open=()=>db.plans.find(p=>p.kind==="lote"&&p.open)||db.plans.find(p=>p.open);
-function pgInicio(){const o=open();return site(`
+function pgInicio(){return site(`
 <section class="hero">${waves()}<div class="container gutter">
  <div class="stack" style="gap:18px;max-width:760px"><h1>Dados, estratégia e resultados reais para a sua carreira.</h1>
  <p>Formações completas, práticas e conectadas com o mercado. Conteúdo liberado toda semana, com projetos aplicados.</p>
- <div class="row"><a class="btn" href="#cursos">Conheça as formações</a><a class="btn dark-ghost" href="#entrar">Assista ao módulo 1 grátis</a></div>
- ${o?`<p class="num" style="font-size:.9rem">${o.name}: ${brl(o.price)} por formação ou ${brl(bundle(o))} todas</p>`:""}</div></div></section>
+ <div class="row"><a class="btn" href="#cursos">Conheça as formações</a><a class="btn dark-ghost" href="#entrar">Assista ao módulo 1 grátis</a></div></div></div></section>
 <div class="container gutter section">
  <div class="row between"><h2 class="title">Formações</h2><a href="#cursos">Todos os cursos</a></div>
  <div class="grid f3">${F.map(f=>`<a class="card" href="#curso-${f.id}" style="border-top:4px solid ${f.color}"><h3>${f.name}</h3><p class="muted">${f.summary}</p><p class="note">40 h · 5 módulos · módulo 1 aberto para avaliação</p></a>`).join("")}</div>

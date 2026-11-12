@@ -1,17 +1,10 @@
 import Link from "next/link";
 import { getFormations } from "@/lib/content";
-import { createClient } from "@/lib/supabase/server";
-import { brl } from "@/lib/billing/money";
 import { HeroWaves } from "@/components/HeroArt";
 import { BrandLockup } from "@/components/Logo";
 
 export default async function Home() {
-  const supabase = await createClient();
-  const [formations, { data: offers }] = await Promise.all([
-    getFormations(),
-    supabase.from("plan_availability").select("code, name, kind, price_cents, all_formations_price_cents, seats, seats_left, on_sale").order("rank"),
-  ]);
-  const open = offers?.find((o) => o.kind === "lote" && o.on_sale) ?? offers?.find((o) => o.on_sale);
+  const formations = await getFormations();
 
   return (
     <>
@@ -25,12 +18,6 @@ export default async function Home() {
               <Link className="btn" href="/cursos">Conheça as formações</Link>
               <Link className="btn on-dark" href="/cadastrar">Assista ao módulo 1 grátis</Link>
             </div>
-            {open && (
-              <p className="num" style={{ fontSize: ".9rem" }}>
-                {open.name}: {brl(open.price_cents)} por formação ou {brl(open.all_formations_price_cents)} todas
-                {open.seats_left != null && ` · ${open.seats_left} de ${open.seats} vagas`}
-              </p>
-            )}
           </div>
         </div>
       </section>
