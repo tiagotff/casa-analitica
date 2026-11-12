@@ -94,11 +94,6 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 .lockup .nm b{display:block;font-family:var(--display);font-weight:700;font-size:clamp(2rem,6vw,3.4rem);line-height:1;letter-spacing:-.02em;color:#fff}
 .lockup .tg{font-size:.76rem;letter-spacing:.42em;text-transform:uppercase;color:var(--side-ink);text-align:center}
 .section{padding-block:40px;display:flex;flex-direction:column;gap:22px}
-.concept{display:grid;grid-template-columns:1.1fr auto 1.4fr;gap:28px;align-items:center}
-.concept .dvl{width:1px;align-self:stretch;background:var(--line)}
-.eq{display:flex;justify-content:space-around;gap:10px;text-align:center;flex-wrap:wrap}
-.eq .op{font-size:1.4rem;font-weight:700;color:var(--muted);align-self:center}
-.eq svg{width:46px;height:46px;stroke:var(--deep)}
 .icon{width:28px;height:28px;stroke:var(--blue);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 
 /* rodapé */
@@ -149,7 +144,7 @@ details.mod[open] summary{border-bottom:1px solid var(--line)}
 .lockbar{display:flex;gap:8px;align-items:center;font-size:.8rem;color:var(--muted)}
 .asaas{max-width:460px;margin:0 auto;border:1px solid var(--line);border-radius:var(--r);background:#fff;box-shadow:var(--shadow);overflow:hidden}
 .asaas .top{background:#0030B9;color:#fff;padding:14px 18px;font-weight:600}
-@media (max-width:900px){.hero .container,.concept{grid-template-columns:1fr}.hero svg.chart{justify-self:start;max-width:340px}.concept .dvl{display:none}}
+@media (max-width:900px){.hero .container{grid-template-columns:1fr}.hero svg.chart{justify-self:start;max-width:340px}}
 @media (max-width:860px){.shell{grid-template-columns:minmax(0,1fr)}.side{position:static;height:auto;padding:12px 16px;gap:10px;min-width:0}.side nav{flex-direction:row;overflow-x:auto;scrollbar-width:none}.side nav::-webkit-scrollbar{display:none}.side .who{flex-direction:row;flex-wrap:wrap;gap:12px}}
 @media (max-width:700px){.footer .cols{grid-template-columns:1fr;gap:22px}.site-header .container{gap:10px 12px}.cta{margin-left:auto}.nav{order:3;width:100%;margin-left:0;flex-wrap:nowrap;overflow-x:auto;gap:16px;scrollbar-width:none;padding-bottom:2px}.nav::-webkit-scrollbar{display:none}.nav a{white-space:nowrap}.hero .container{padding-block:40px}}
 @media (prefers-reduced-motion:no-preference){.bar i{transition:width .4s ease}}
@@ -326,10 +321,6 @@ function pgInicio(){const o=open();return site(`
  <div class="row"><a class="btn" href="#cursos">Conheça as formações</a><a class="btn dark-ghost" href="#entrar">Assista ao módulo 1 grátis</a></div>
  ${o?`<p class="num" style="font-size:.9rem">${o.name}: ${brl(o.price)} por formação ou ${brl(bundle(o))} todas</p>`:""}</div>${chart()}</div></section>
 <div class="container gutter section">
- <div class="card concept"><div class="stack"><h2 class="title">Conceito da marca</h2><p class="muted">A Casa Analítica é um espaço de formação completo em Dados e Negócios, que conecta conhecimento, prática e mercado para acelerar a sua carreira.</p></div><span class="dvl"></span>
- <div class="eq"><div class="stack" style="align-items:center;gap:4px"><svg viewBox="0 0 48 48" fill="none" stroke-width="2.6" stroke-linejoin="round"><path d="M8 22 24 8l16 14v18H8z"/></svg><strong>Casa</strong><span class="note">pertencimento,<br>comunidade</span></div><span class="op">+</span>
- <div class="stack" style="align-items:center;gap:4px"><svg viewBox="0 0 48 48" fill="none" stroke-width="6"><path d="M12 40V28M24 40V18M36 40V8"/></svg><strong>Dados</strong><span class="note">análise,<br>insights</span></div><span class="op">+</span>
- <div class="stack" style="align-items:center;gap:4px"><svg viewBox="0 0 48 48" fill="none" stroke-width="2.6" stroke-linecap="round"><path d="M6 40C18 36 30 24 40 10M30 10h10v10"/></svg><strong>Evolução</strong><span class="note">carreira,<br>resultados</span></div></div></div>
  <div class="row between"><h2 class="title">Formações</h2><a href="#cursos">Todos os cursos</a></div>
  <div class="grid f3">${F.map(f=>`<a class="card" href="#curso-${f.id}" style="border-top:4px solid ${f.color}"><h3>${f.name}</h3><p class="muted">${f.summary}</p><p class="note">40 h · 5 módulos · módulo 1 aberto para avaliação</p></a>`).join("")}</div>
  <h2 class="title">Como funciona</h2>

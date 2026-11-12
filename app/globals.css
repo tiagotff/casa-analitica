@@ -178,13 +178,6 @@ details.module[open] summary { border-bottom: 1px solid var(--line); }
 .brand-band { background: linear-gradient(180deg, #0B1F3B 0%, #081834 100%); color: #fff; position: relative; overflow: hidden; }
 .brand-band .container { position: relative; padding-block: 56px; display: flex; justify-content: center; }
 
-.concept { display: grid; grid-template-columns: 1.1fr auto 1.4fr; gap: 28px; align-items: center; }
-.concept .divider { width: 1px; align-self: stretch; background: var(--line); }
-.concept-eq { display: flex; align-items: flex-start; justify-content: space-around; gap: 12px; text-align: center; flex-wrap: wrap; }
-.concept-eq .op { font-size: 1.4rem; font-weight: 700; color: var(--muted); align-self: center; }
-.concept-eq svg { width: 48px; height: 48px; stroke: var(--deep); }
-@media (prefers-color-scheme: dark) { .concept-eq svg { stroke: var(--ink); } }
-@media (max-width: 760px) { .concept { grid-template-columns: 1fr; } .concept .divider { display: none; } }
 .icon-line { width: 28px; height: 28px; stroke: var(--blue); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .kv { display: grid; grid-template-columns: 1fr auto; gap: 8px 16px; margin: 0; }
 .kv dt { color: var(--muted); } .kv dd { margin: 0; text-align: right; font-weight: 600; }

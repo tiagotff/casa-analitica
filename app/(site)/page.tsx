@@ -37,30 +37,6 @@ export default async function Home() {
       </section>
 
       <div className="container section">
-        <div className="card concept">
-          <div className="stack">
-            <h2 className="section-title">Conceito da marca</h2>
-            <p className="muted">A Casa Analítica é um espaço de formação completo em Dados e Negócios, que conecta conhecimento, prática e mercado para acelerar a sua carreira.</p>
-          </div>
-          <span className="divider" />
-          <div className="concept-eq">
-            <div className="stack" style={{ alignItems: "center", gap: 4 }}>
-              <svg viewBox="0 0 48 48" fill="none" strokeWidth="2.6" strokeLinejoin="round"><path d="M8 22 24 8l16 14v18H8z" /></svg>
-              <strong>Casa</strong><span className="note">pertencimento,<br />comunidade</span>
-            </div>
-            <span className="op">+</span>
-            <div className="stack" style={{ alignItems: "center", gap: 4 }}>
-              <svg viewBox="0 0 48 48" fill="none" strokeWidth="6" strokeLinecap="butt"><path d="M12 40V28M24 40V18M36 40V8" /></svg>
-              <strong>Dados</strong><span className="note">análise,<br />insights</span>
-            </div>
-            <span className="op">+</span>
-            <div className="stack" style={{ alignItems: "center", gap: 4 }}>
-              <svg viewBox="0 0 48 48" fill="none" strokeWidth="2.6" strokeLinecap="round"><path d="M6 40C18 36 30 24 40 10M30 10h10v10" /></svg>
-              <strong>Evolução</strong><span className="note">carreira,<br />resultados</span>
-            </div>
-          </div>
-        </div>
-
         <div className="row between"><h2 className="section-title">Formações</h2><Link href="/cursos">Todos os cursos</Link></div>
         <div className="grid f3">
           {formations.map((f) => (
