@@ -2,7 +2,7 @@ import Link from "next/link";
 import { getFormations } from "@/lib/content";
 import { createClient } from "@/lib/supabase/server";
 import { brl } from "@/lib/billing/money";
-import { HeroChart, HeroWaves } from "@/components/HeroArt";
+import { HeroWaves } from "@/components/HeroArt";
 import { BrandLockup } from "@/components/Logo";
 
 export default async function Home() {
@@ -32,7 +32,6 @@ export default async function Home() {
               </p>
             )}
           </div>
-          <HeroChart />
         </div>
       </section>
 

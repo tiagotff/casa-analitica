@@ -82,10 +82,9 @@ body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset
 /* hero */
 .hero{position:relative;overflow:hidden;color:#fff;background:radial-gradient(60% 90% at 85% 85%,rgba(124,58,237,.38),transparent 60%),radial-gradient(50% 70% at 8% 0%,rgba(37,99,235,.25),transparent 60%),linear-gradient(180deg,#0B1F3B,#081834)}
 .hero svg.waves{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
-.hero .container{position:relative;padding-block:64px;display:grid;grid-template-columns:1.1fr 1fr;gap:32px;align-items:center}
+.hero .container{position:relative;padding-block:64px}
 .hero h1{color:#fff;font-size:clamp(1.9rem,4.2vw,2.9rem)}
 .hero p{color:var(--side-ink);max-width:52ch}
-.hero svg.chart{width:100%;max-width:460px;justify-self:end}
 .band{position:relative;overflow:hidden;background:linear-gradient(180deg,#0B1F3B,#081834);color:#fff}
 .band .container{position:relative;padding-block:48px;display:flex;justify-content:center}
 .lockup{display:inline-flex;flex-direction:column;align-items:center;gap:16px}
@@ -144,7 +143,6 @@ details.mod[open] summary{border-bottom:1px solid var(--line)}
 .lockbar{display:flex;gap:8px;align-items:center;font-size:.8rem;color:var(--muted)}
 .asaas{max-width:460px;margin:0 auto;border:1px solid var(--line);border-radius:var(--r);background:#fff;box-shadow:var(--shadow);overflow:hidden}
 .asaas .top{background:#0030B9;color:#fff;padding:14px 18px;font-weight:600}
-@media (max-width:900px){.hero .container{grid-template-columns:1fr}.hero svg.chart{justify-self:start;max-width:340px}}
 @media (max-width:860px){.shell{grid-template-columns:minmax(0,1fr)}.side{position:static;height:auto;padding:12px 16px;gap:10px;min-width:0}.side nav{flex-direction:row;overflow-x:auto;scrollbar-width:none}.side nav::-webkit-scrollbar{display:none}.side .who{flex-direction:row;flex-wrap:wrap;gap:12px}}
 @media (max-width:700px){.footer .cols{grid-template-columns:1fr;gap:22px}.site-header .container{gap:10px 12px}.cta{margin-left:auto}.nav{order:3;width:100%;margin-left:0;flex-wrap:nowrap;overflow-x:auto;gap:16px;scrollbar-width:none;padding-bottom:2px}.nav::-webkit-scrollbar{display:none}.nav a{white-space:nowrap}.hero .container{padding-block:40px}}
 @media (prefers-reduced-motion:no-preference){.bar i{transition:width .4s ease}}
@@ -281,7 +279,6 @@ const SYMBOL="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAYAAABccqhm
 function mark(size=40){return `<img src="${SYMBOL}" width="${size}" height="${size}" alt="" aria-hidden="true" style="display:block">`}
 const brand=`<a class="brand" href="#inicio" aria-label="Casa Analítica, início">${mark()}<span class="wordmark"><b>Casa</b><b>Analítica</b></span></a>`;
 const waves=()=>`<svg class="waves" viewBox="0 0 880 440" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><defs><linearGradient id="ws" x1="0" x2="1"><stop offset="0" stop-color="#2563EB" stop-opacity="0"/><stop offset=".45" stop-color="#3B82F6" stop-opacity=".55"/><stop offset="1" stop-color="#7C3AED" stop-opacity=".5"/></linearGradient></defs>${Array.from({length:18},(_,i)=>{const o=i*7;return `<path d="M-20 ${250+o} C 160 ${170+o}, 300 ${330+o}, 480 ${220+o} S 760 ${120+o}, 900 ${200+o}" fill="none" stroke="url(#ws)" stroke-width=".8"/>`}).join("")}</svg>`;
-const chart=()=>`<svg class="chart" viewBox="0 0 360 220" aria-hidden="true"><defs><linearGradient id="bf" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#2563EB" stop-opacity=".55"/><stop offset="1" stop-color="#8B5CF6"/></linearGradient><filter id="gl" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>${[50,100,150].map(y=>`<line x1="0" x2="360" y1="${y}" y2="${y}" stroke="#fff" stroke-opacity=".06"/>`).join("")}<g filter="url(#gl)">${[34,52,46,70,88,104,128,150].map((h,i)=>`<rect x="${12+i*43}" y="${200-h}" width="26" height="${h}" rx="3" fill="url(#bf)"/>`).join("")}</g><line x1="0" x2="360" y1="200.5" y2="200.5" stroke="#fff" stroke-opacity=".15"/></svg>`;
 
 /* ===================== Layouts ===================== */
 function site(body,cur){const u=me();return `
@@ -316,10 +313,10 @@ function guard(area){const u=me();
 const open=()=>db.plans.find(p=>p.kind==="lote"&&p.open)||db.plans.find(p=>p.open);
 function pgInicio(){const o=open();return site(`
 <section class="hero">${waves()}<div class="container gutter">
- <div class="stack" style="gap:18px"><h1>Dados, estratégia e resultados reais para a sua carreira.</h1>
+ <div class="stack" style="gap:18px;max-width:760px"><h1>Dados, estratégia e resultados reais para a sua carreira.</h1>
  <p>Formações completas, práticas e conectadas com o mercado. Conteúdo liberado toda semana, com projetos aplicados.</p>
  <div class="row"><a class="btn" href="#cursos">Conheça as formações</a><a class="btn dark-ghost" href="#entrar">Assista ao módulo 1 grátis</a></div>
- ${o?`<p class="num" style="font-size:.9rem">${o.name}: ${brl(o.price)} por formação ou ${brl(bundle(o))} todas</p>`:""}</div>${chart()}</div></section>
+ ${o?`<p class="num" style="font-size:.9rem">${o.name}: ${brl(o.price)} por formação ou ${brl(bundle(o))} todas</p>`:""}</div></div></section>
 <div class="container gutter section">
  <div class="row between"><h2 class="title">Formações</h2><a href="#cursos">Todos os cursos</a></div>
  <div class="grid f3">${F.map(f=>`<a class="card" href="#curso-${f.id}" style="border-top:4px solid ${f.color}"><h3>${f.name}</h3><p class="muted">${f.summary}</p><p class="note">40 h · 5 módulos · módulo 1 aberto para avaliação</p></a>`).join("")}</div>
